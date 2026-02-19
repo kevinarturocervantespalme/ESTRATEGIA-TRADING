@@ -4,6 +4,7 @@ indicator("Patrón de Manipulación- M & W", overlay=true, max_lines_count=500, 
 lookback = 20
 minLabelSpacing = input.int(6, "Separación mínima entre etiquetas", minval=1)
 maxDrawings = input.int(120, "Máximo de líneas/etiquetas visibles", minval=20, maxval=500)
+counterTrendExtremeMult = input.float(2.5, "Multiplicador ATR para contra-tendencia extrema", minval=1.5, step=0.1)
 
 var array<line> drawnLines = array.new_line()
 var array<label> drawnLabels = array.new_label()
@@ -26,129 +27,226 @@ var bool sellArmed = false
 var float sellTrigger = na
 var int sellSweepBar = na
 var float sellSweepHigh = na
+var float sellPriorHigh = na
+var int sellPeak1Bar = na
+var int sellMidBar = na
+var float sellMidLow = na
 var line sellTriggerLine = na
 
 var bool buyArmed = false
 var float buyTrigger = na
 var int buySweepBar = na
 var float buySweepLow = na
+var float buyPriorLow = na
+var int buyValley1Bar = na
+var int buyMidBar = na
+var float buyMidHigh = na
 var line buyTriggerLine = na
 
 var int lastLabelBar = na
 
+atr14 = ta.atr(14)
+avgAtr14 = ta.sma(atr14, 14)
+rsi14 = ta.rsi(close, 14)
+ema200 = ta.ema(close, 200)
+
+body = math.abs(close - open)
+range = high - low
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+isMarubozu = range > 0 and upperWick <= range * 0.15 and lowerWick <= range * 0.15
+isLargeBody = not na(avgAtr14) and body >= avgAtr14 * 1.5
+isIntentCandle = (isMarubozu or isLargeBody) and isLargeBody
+isExtremeDisplacement = not na(avgAtr14) and body >= avgAtr14 * counterTrendExtremeMult and isIntentCandle
+
+allowSellByMacro = close < ema200 or isExtremeDisplacement
+allowBuyByMacro = close > ema200 or isExtremeDisplacement
+
 enoughBars = bar_index > lookback
 
-priorHigh = enoughBars ? ta.highest(high[1], lookback) : na
-priorHighOffset = enoughBars ? ta.highestbars(high[1], lookback) : na
-peak1Bar = enoughBars ? bar_index - priorHighOffset - 1 : na
+float priorHigh = enoughBars ? ta.highest(high[1], lookback) : na
+int priorHighOffset = enoughBars ? ta.highestbars(high[1], lookback) : na
+int peak1Bar = enoughBars and not na(priorHighOffset) ? bar_index - priorHighOffset - 1 : na
 
-priorLow = enoughBars ? ta.lowest(low[1], lookback) : na
-priorLowOffset = enoughBars ? ta.lowestbars(low[1], lookback) : na
-valley1Bar = enoughBars ? bar_index - priorLowOffset - 1 : na
+float priorLow = enoughBars ? ta.lowest(low[1], lookback) : na
+int priorLowOffset = enoughBars ? ta.lowestbars(low[1], lookback) : na
+int valley1Bar = enoughBars and not na(priorLowOffset) ? bar_index - priorLowOffset - 1 : na
 
-bearSweep = enoughBars and not na(priorHigh) and high > priorHigh and close < priorHigh
-bullSweep = enoughBars and not na(priorLow) and low < priorLow and close > priorLow
+bool rsiOverboughtDuringM = false
+if enoughBars and not na(peak1Bar)
+    for i = 0 to lookback
+        int idx = bar_index - i
+        if idx >= peak1Bar and idx <= bar_index and rsi14[i] > 70
+            rsiOverboughtDuringM := true
+
+bool rsiOversoldDuringW = false
+if enoughBars and not na(valley1Bar)
+    for i = 0 to lookback
+        int idx = bar_index - i
+        if idx >= valley1Bar and idx <= bar_index and rsi14[i] < 30
+            rsiOversoldDuringW := true
+
+bearSweep = enoughBars and not na(priorHigh) and high > priorHigh and close < priorHigh and rsiOverboughtDuringM
+bullSweep = enoughBars and not na(priorLow) and low < priorLow and close > priorLow and rsiOversoldDuringW
 
 if bearSweep and not na(peak1Bar)
     sellArmed := true
     sellTrigger := low
     sellSweepBar := bar_index
     sellSweepHigh := high
+    sellPriorHigh := priorHigh
+    sellPeak1Bar := peak1Bar
+
+    float tmpMidLow = na
+    int tmpMidBar = na
+    for i = 1 to lookback
+        int idx = bar_index - i
+        if idx > sellPeak1Bar and idx < bar_index
+            float candidate = low[i]
+            if na(tmpMidLow) or candidate < tmpMidLow
+                tmpMidLow := candidate
+                tmpMidBar := idx
+    sellMidLow := tmpMidLow
+    sellMidBar := tmpMidBar
 
     if not na(sellTriggerLine)
         line.delete(sellTriggerLine)
-
-    line sellTop = line.new(peak1Bar, priorHigh, bar_index, priorHigh, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2)
-    f_trackLine(sellTop)
-
-    float mMidLow = na
-    int mMidBar = na
-    for i = 1 to lookback
-        int idx = bar_index - i
-        if idx > peak1Bar and idx < bar_index
-            float candidate = low[i]
-            if na(mMidLow) or candidate < mMidLow
-                mMidLow := candidate
-                mMidBar := idx
-
-    if not na(mMidBar)
-        line mLeft = line.new(peak1Bar, priorHigh, mMidBar, mMidLow, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2)
-        line mRight = line.new(mMidBar, mMidLow, bar_index, high, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2)
-        f_trackLine(mLeft)
-        f_trackLine(mRight)
-
     sellTriggerLine := line.new(bar_index, sellTrigger, bar_index + 1, sellTrigger, xloc=xloc.bar_index, extend=extend.right, color=color.yellow, style=line.style_dashed, width=2)
     f_trackLine(sellTriggerLine)
-
-sellBreak = sellArmed and not na(sellSweepBar) and bar_index > sellSweepBar and low < sellTrigger
-if sellBreak
-    if not na(sellTriggerLine)
-        line.set_x2(sellTriggerLine, bar_index)
-        line.set_extend(sellTriggerLine, extend.none)
-
-    line mFinal = line.new(sellSweepBar, sellSweepHigh, bar_index, sellTrigger, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2)
-    f_trackLine(mFinal)
-
-    canPrintSellLabel = na(lastLabelBar) or bar_index - lastLabelBar >= minLabelSpacing
-    if canPrintSellLabel
-        label sellLabel = label.new(bar_index, high, "¡PATRÓN DE MANIPULACIÓN DETECTADO! ENTRAR SELL", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
-        f_trackLabel(sellLabel)
-        lastLabelBar := bar_index
-
-    sellArmed := false
-    sellTrigger := na
-    sellSweepBar := na
-    sellSweepHigh := na
-    sellTriggerLine := na
 
 if bullSweep and not na(valley1Bar)
     buyArmed := true
     buyTrigger := high
     buySweepBar := bar_index
     buySweepLow := low
+    buyPriorLow := priorLow
+    buyValley1Bar := valley1Bar
+
+    float tmpMidHigh = na
+    int tmpMidBar = na
+    for i = 1 to lookback
+        int idx = bar_index - i
+        if idx > buyValley1Bar and idx < bar_index
+            float candidate = high[i]
+            if na(tmpMidHigh) or candidate > tmpMidHigh
+                tmpMidHigh := candidate
+                tmpMidBar := idx
+    buyMidHigh := tmpMidHigh
+    buyMidBar := tmpMidBar
 
     if not na(buyTriggerLine)
         line.delete(buyTriggerLine)
-
-    line buyBottom = line.new(valley1Bar, priorLow, bar_index, priorLow, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2)
-    f_trackLine(buyBottom)
-
-    float wMidHigh = na
-    int wMidBar = na
-    for i = 1 to lookback
-        int idx = bar_index - i
-        if idx > valley1Bar and idx < bar_index
-            float candidate = high[i]
-            if na(wMidHigh) or candidate > wMidHigh
-                wMidHigh := candidate
-                wMidBar := idx
-
-    if not na(wMidBar)
-        line wLeft = line.new(valley1Bar, priorLow, wMidBar, wMidHigh, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2)
-        line wRight = line.new(wMidBar, wMidHigh, bar_index, low, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2)
-        f_trackLine(wLeft)
-        f_trackLine(wRight)
-
     buyTriggerLine := line.new(bar_index, buyTrigger, bar_index + 1, buyTrigger, xloc=xloc.bar_index, extend=extend.right, color=color.yellow, style=line.style_dashed, width=2)
     f_trackLine(buyTriggerLine)
 
-buyBreak = buyArmed and not na(buySweepBar) and bar_index > buySweepBar and high > buyTrigger
-if buyBreak
+sellExpired = sellArmed and not na(sellSweepBar) and bar_index - sellSweepBar > lookback
+sellInvalidated = sellArmed and ((not na(sellSweepHigh) and close > sellSweepHigh) or sellExpired)
+if sellInvalidated
+    if not na(sellTriggerLine)
+        line.delete(sellTriggerLine)
+    sellArmed := false
+    sellTrigger := na
+    sellSweepBar := na
+    sellSweepHigh := na
+    sellPriorHigh := na
+    sellPeak1Bar := na
+    sellMidBar := na
+    sellMidLow := na
+    sellTriggerLine := na
+
+buyExpired = buyArmed and not na(buySweepBar) and bar_index - buySweepBar > lookback
+buyInvalidated = buyArmed and ((not na(buySweepLow) and close < buySweepLow) or buyExpired)
+if buyInvalidated
     if not na(buyTriggerLine)
-        line.set_x2(buyTriggerLine, bar_index)
-        line.set_extend(buyTriggerLine, extend.none)
+        line.delete(buyTriggerLine)
+    buyArmed := false
+    buyTrigger := na
+    buySweepBar := na
+    buySweepLow := na
+    buyPriorLow := na
+    buyValley1Bar := na
+    buyMidBar := na
+    buyMidHigh := na
+    buyTriggerLine := na
 
-    line wFinal = line.new(buySweepBar, buySweepLow, bar_index, buyTrigger, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2)
-    f_trackLine(wFinal)
+sellBreakRaw = sellArmed and not na(sellSweepBar) and bar_index > sellSweepBar and low < sellTrigger
+sellBreakConfirmed = sellBreakRaw and close < sellTrigger and isIntentCandle and close < open and allowSellByMacro
+if sellBreakRaw
+    if sellBreakConfirmed
+        if not na(sellTriggerLine)
+            line.set_x2(sellTriggerLine, bar_index)
+            line.set_extend(sellTriggerLine, extend.none)
 
-    canPrintBuyLabel = na(lastLabelBar) or bar_index - lastLabelBar >= minLabelSpacing
-    if canPrintBuyLabel
-        label buyLabel = label.new(bar_index, low, "¡PATRÓN DE MANIPULACIÓN DETECTADO! ENTRAR BUY", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.white, size=size.small)
-        f_trackLabel(buyLabel)
-        lastLabelBar := bar_index
+        line sellTop = line.new(sellPeak1Bar, sellPriorHigh, sellSweepBar, sellPriorHigh, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2, style=line.style_solid)
+        line sellFinal = line.new(sellSweepBar, sellSweepHigh, bar_index, sellTrigger, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2, style=line.style_solid)
+        f_trackLine(sellTop)
+        f_trackLine(sellFinal)
+
+        if not na(sellMidBar) and not na(sellMidLow)
+            line sellLeft = line.new(sellPeak1Bar, sellPriorHigh, sellMidBar, sellMidLow, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2, style=line.style_solid)
+            line sellRight = line.new(sellMidBar, sellMidLow, sellSweepBar, sellSweepHigh, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2, style=line.style_solid)
+            f_trackLine(sellLeft)
+            f_trackLine(sellRight)
+        else
+            line sellBridge = line.new(sellPeak1Bar, sellPriorHigh, sellSweepBar, sellSweepHigh, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2, style=line.style_solid)
+            f_trackLine(sellBridge)
+
+        canPrintSellLabel = na(lastLabelBar) or bar_index - lastLabelBar >= minLabelSpacing
+        if canPrintSellLabel
+            label sellLabel = label.new(bar_index, high + atr14 * 0.2, "¡PATRÓN DE MANIPULACIÓN DETECTADO! ENTRAR SELL", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+            f_trackLabel(sellLabel)
+            lastLabelBar := bar_index
+    else
+        if not na(sellTriggerLine)
+            line.delete(sellTriggerLine)
+
+    sellArmed := false
+    sellTrigger := na
+    sellSweepBar := na
+    sellSweepHigh := na
+    sellPriorHigh := na
+    sellPeak1Bar := na
+    sellMidBar := na
+    sellMidLow := na
+    sellTriggerLine := na
+
+buyBreakRaw = buyArmed and not na(buySweepBar) and bar_index > buySweepBar and high > buyTrigger
+buyBreakConfirmed = buyBreakRaw and close > buyTrigger and isIntentCandle and close > open and allowBuyByMacro
+if buyBreakRaw
+    if buyBreakConfirmed
+        if not na(buyTriggerLine)
+            line.set_x2(buyTriggerLine, bar_index)
+            line.set_extend(buyTriggerLine, extend.none)
+
+        line buyBottom = line.new(buyValley1Bar, buyPriorLow, buySweepBar, buyPriorLow, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2, style=line.style_solid)
+        line buyFinal = line.new(buySweepBar, buySweepLow, bar_index, buyTrigger, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2, style=line.style_solid)
+        f_trackLine(buyBottom)
+        f_trackLine(buyFinal)
+
+        if not na(buyMidBar) and not na(buyMidHigh)
+            line buyLeft = line.new(buyValley1Bar, buyPriorLow, buyMidBar, buyMidHigh, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2, style=line.style_solid)
+            line buyRight = line.new(buyMidBar, buyMidHigh, buySweepBar, buySweepLow, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2, style=line.style_solid)
+            f_trackLine(buyLeft)
+            f_trackLine(buyRight)
+        else
+            line buyBridge = line.new(buyValley1Bar, buyPriorLow, buySweepBar, buySweepLow, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2, style=line.style_solid)
+            f_trackLine(buyBridge)
+
+        canPrintBuyLabel = na(lastLabelBar) or bar_index - lastLabelBar >= minLabelSpacing
+        if canPrintBuyLabel
+            label buyLabel = label.new(bar_index, low - atr14 * 0.2, "¡PATRÓN DE MANIPULACIÓN DETECTADO! ENTRAR BUY", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.white, size=size.small)
+            f_trackLabel(buyLabel)
+            lastLabelBar := bar_index
+    else
+        if not na(buyTriggerLine)
+            line.delete(buyTriggerLine)
 
     buyArmed := false
     buyTrigger := na
     buySweepBar := na
     buySweepLow := na
+    buyPriorLow := na
+    buyValley1Bar := na
+    buyMidBar := na
+    buyMidHigh := na
     buyTriggerLine := na
