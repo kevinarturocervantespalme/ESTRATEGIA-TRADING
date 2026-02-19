@@ -51,10 +51,10 @@ rsi14 = ta.rsi(close, 14)
 ema200 = ta.ema(close, 200)
 
 body = math.abs(close - open)
-range = high - low
+candleRange = high - low
 upperWick = high - math.max(open, close)
 lowerWick = math.min(open, close) - low
-isMarubozu = range > 0 and upperWick <= range * 0.15 and lowerWick <= range * 0.15
+isMarubozu = candleRange > 0 and upperWick <= candleRange * 0.15 and lowerWick <= candleRange * 0.15
 isLargeBody = not na(avgAtr14) and body >= avgAtr14 * 1.5
 isIntentCandle = (isMarubozu or isLargeBody) and isLargeBody
 isExtremeDisplacement = not na(avgAtr14) and body >= avgAtr14 * counterTrendExtremeMult and isIntentCandle
