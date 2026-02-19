@@ -1,0 +1,154 @@
+//@version=6
+indicator("Patrón de Manipulación- M & W", overlay=true, max_lines_count=500, max_labels_count=500)
+
+lookback = 20
+minLabelSpacing = input.int(6, "Separación mínima entre etiquetas", minval=1)
+maxDrawings = input.int(120, "Máximo de líneas/etiquetas visibles", minval=20, maxval=500)
+
+var array<line> drawnLines = array.new_line()
+var array<label> drawnLabels = array.new_label()
+
+f_trackLine(line ln) =>
+    if not na(ln)
+        array.push(drawnLines, ln)
+        if array.size(drawnLines) > maxDrawings
+            line oldLn = array.shift(drawnLines)
+            line.delete(oldLn)
+
+f_trackLabel(label lb) =>
+    if not na(lb)
+        array.push(drawnLabels, lb)
+        if array.size(drawnLabels) > maxDrawings
+            label oldLb = array.shift(drawnLabels)
+            label.delete(oldLb)
+
+var bool sellArmed = false
+var float sellTrigger = na
+var int sellSweepBar = na
+var float sellSweepHigh = na
+var line sellTriggerLine = na
+
+var bool buyArmed = false
+var float buyTrigger = na
+var int buySweepBar = na
+var float buySweepLow = na
+var line buyTriggerLine = na
+
+var int lastLabelBar = na
+
+enoughBars = bar_index > lookback
+
+priorHigh = enoughBars ? ta.highest(high[1], lookback) : na
+priorHighOffset = enoughBars ? ta.highestbars(high[1], lookback) : na
+peak1Bar = enoughBars ? bar_index - priorHighOffset - 1 : na
+
+priorLow = enoughBars ? ta.lowest(low[1], lookback) : na
+priorLowOffset = enoughBars ? ta.lowestbars(low[1], lookback) : na
+valley1Bar = enoughBars ? bar_index - priorLowOffset - 1 : na
+
+bearSweep = enoughBars and not na(priorHigh) and high > priorHigh and close < priorHigh
+bullSweep = enoughBars and not na(priorLow) and low < priorLow and close > priorLow
+
+if bearSweep and not na(peak1Bar)
+    sellArmed := true
+    sellTrigger := low
+    sellSweepBar := bar_index
+    sellSweepHigh := high
+
+    if not na(sellTriggerLine)
+        line.delete(sellTriggerLine)
+
+    line sellTop = line.new(peak1Bar, priorHigh, bar_index, priorHigh, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2)
+    f_trackLine(sellTop)
+
+    float mMidLow = na
+    int mMidBar = na
+    for i = 1 to lookback
+        int idx = bar_index - i
+        if idx > peak1Bar and idx < bar_index
+            float candidate = low[i]
+            if na(mMidLow) or candidate < mMidLow
+                mMidLow := candidate
+                mMidBar := idx
+
+    if not na(mMidBar)
+        line mLeft = line.new(peak1Bar, priorHigh, mMidBar, mMidLow, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2)
+        line mRight = line.new(mMidBar, mMidLow, bar_index, high, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2)
+        f_trackLine(mLeft)
+        f_trackLine(mRight)
+
+    sellTriggerLine := line.new(bar_index, sellTrigger, bar_index + 1, sellTrigger, xloc=xloc.bar_index, extend=extend.right, color=color.yellow, style=line.style_dashed, width=2)
+    f_trackLine(sellTriggerLine)
+
+sellBreak = sellArmed and not na(sellSweepBar) and bar_index > sellSweepBar and low < sellTrigger
+if sellBreak
+    if not na(sellTriggerLine)
+        line.set_x2(sellTriggerLine, bar_index)
+        line.set_extend(sellTriggerLine, extend.none)
+
+    line mFinal = line.new(sellSweepBar, sellSweepHigh, bar_index, sellTrigger, xloc=xloc.bar_index, color=color.new(color.red, 0), width=2)
+    f_trackLine(mFinal)
+
+    canPrintSellLabel = na(lastLabelBar) or bar_index - lastLabelBar >= minLabelSpacing
+    if canPrintSellLabel
+        label sellLabel = label.new(bar_index, high, "¡PATRÓN DE MANIPULACIÓN DETECTADO! ENTRAR SELL", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+        f_trackLabel(sellLabel)
+        lastLabelBar := bar_index
+
+    sellArmed := false
+    sellTrigger := na
+    sellSweepBar := na
+    sellSweepHigh := na
+    sellTriggerLine := na
+
+if bullSweep and not na(valley1Bar)
+    buyArmed := true
+    buyTrigger := high
+    buySweepBar := bar_index
+    buySweepLow := low
+
+    if not na(buyTriggerLine)
+        line.delete(buyTriggerLine)
+
+    line buyBottom = line.new(valley1Bar, priorLow, bar_index, priorLow, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2)
+    f_trackLine(buyBottom)
+
+    float wMidHigh = na
+    int wMidBar = na
+    for i = 1 to lookback
+        int idx = bar_index - i
+        if idx > valley1Bar and idx < bar_index
+            float candidate = high[i]
+            if na(wMidHigh) or candidate > wMidHigh
+                wMidHigh := candidate
+                wMidBar := idx
+
+    if not na(wMidBar)
+        line wLeft = line.new(valley1Bar, priorLow, wMidBar, wMidHigh, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2)
+        line wRight = line.new(wMidBar, wMidHigh, bar_index, low, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2)
+        f_trackLine(wLeft)
+        f_trackLine(wRight)
+
+    buyTriggerLine := line.new(bar_index, buyTrigger, bar_index + 1, buyTrigger, xloc=xloc.bar_index, extend=extend.right, color=color.yellow, style=line.style_dashed, width=2)
+    f_trackLine(buyTriggerLine)
+
+buyBreak = buyArmed and not na(buySweepBar) and bar_index > buySweepBar and high > buyTrigger
+if buyBreak
+    if not na(buyTriggerLine)
+        line.set_x2(buyTriggerLine, bar_index)
+        line.set_extend(buyTriggerLine, extend.none)
+
+    line wFinal = line.new(buySweepBar, buySweepLow, bar_index, buyTrigger, xloc=xloc.bar_index, color=color.new(color.lime, 0), width=2)
+    f_trackLine(wFinal)
+
+    canPrintBuyLabel = na(lastLabelBar) or bar_index - lastLabelBar >= minLabelSpacing
+    if canPrintBuyLabel
+        label buyLabel = label.new(bar_index, low, "¡PATRÓN DE MANIPULACIÓN DETECTADO! ENTRAR BUY", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.white, size=size.small)
+        f_trackLabel(buyLabel)
+        lastLabelBar := bar_index
+
+    buyArmed := false
+    buyTrigger := na
+    buySweepBar := na
+    buySweepLow := na
+    buyTriggerLine := na
